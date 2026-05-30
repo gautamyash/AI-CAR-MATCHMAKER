@@ -1,36 +1,179 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Car Matchmaker
 
-## Getting Started
+An intelligent car recommendation system that analyzes user preferences and recommends the best matching vehicles from a curated database.
 
-First, run the development server:
+## Project Overview
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+**AI Car Matchmaker** is a recommendation engine that uses natural language processing to understand user requirements and intelligently rank cars based on multiple criteria:
+
+- **Budget constraints** - Parses Indian currency formats (crores, lakhs)
+- **Vehicle preferences** - Type (SUV, Sedan, Hatchback), transmission, fuel type
+- **Family needs** - Family size-specific seating optimization
+- **Use case** - City or highway suitability
+- **Priorities** - Safety, mileage, or spaciousness
+
+The system returns top 5 matched vehicles with personalized recommendations and scoring explanations.
+
+## Tech Stack
+
+- **Framework**: [Next.js 15](https://nextjs.org) with App Router
+- **Language**: TypeScript
+- **Styling**: CSS & Tailwind CSS (PostCSS)
+- **Data**: JSON-based car database
+- **Linting**: ESLint
+
+## Setup Steps
+
+### Prerequisites
+
+- Node.js 18+ and npm/yarn/pnpm/bun
+
+### Installation
+
+1. **Clone the repository**
+
+   ```bash
+   git clone <repository-url>
+   cd ai-car-matchmaker
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+3. **Run development server**
+
+   ```bash
+   npm run dev
+   ```
+
+   Opens at [http://localhost:3000](http://localhost:3000)
+
+4. **Build for production**
+   ```bash
+   npm run build
+   npm run start
+   ```
+
+## Recommendation Logic
+
+The scoring algorithm evaluates each car across multiple dimensions:
+
+### Budget Scoring (0-30 points)
+
+- Rewards cars within budget range
+- Diminishes score if car exceeds budget
+
+### Feature Matching (Points vary)
+
+- **Type match**: +20 pts (SUV, Sedan, Hatchback)
+- **EV preference**: +25 pts
+- **Transmission**: +15 pts
+- **Use case**: +12 pts (city/highway suitability)
+
+### Safety & Efficiency
+
+- **Safety**: 6x multiplier if prioritized, 2x otherwise
+- **Mileage**: Up to 30 pts for fuel efficiency
+- **EV mileage**: +18 pts if electric
+
+### Family-Focused Scoring
+
+- **Small families (2-4 people)**
+  - 4-5 seaters: +30 pts ✓
+  - 7+ seaters: -20 pts (penalized)
+- **Larger families (5+ people)**
+  - 7+ seaters: +30 pts ✓
+  - 4-5 seaters: -15 pts (penalized)
+- **Boot space**: Up to 15 pts bonus
+
+### Final Ranking
+
+Cars are sorted by score (descending) and price (ascending), returning top 5 matches.
+
+## API Endpoint
+
+**POST** `/api/recommend`
+
+### Request Body
+
+```json
+{
+  "query": "I need a safe SUV under 20 lakhs for my family of 4",
+  "prompt": "optional additional context",
+  "queries": ["alternative query strings"]
+}
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Response
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```json
+{
+  "query": "parsed query text",
+  "parsed": { "budget": 2000000, "type": "SUV", "familySize": 4, ... },
+  "count": 5,
+  "recommendations": [
+    {
+      "id": 1,
+      "name": "Model Name",
+      "brand": "Brand",
+      "price": 1800000,
+      "score": 85.5,
+      "reason": "matches your family needs..."
+    }
+  ]
+}
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deployment
 
-## Learn More
+### Deploy on Vercel (Recommended)
 
-To learn more about Next.js, take a look at the following resources:
+Vercel is optimized for Next.js:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Push code to GitHub/GitLab
+2. Connect to [Vercel](https://vercel.com)
+3. Auto-deploys on push to main branch
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Deploy on Other Platforms
 
-## Deploy on Vercel
+**Docker**
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+docker build -t ai-car-matchmaker .
+docker run -p 3000:3000 ai-car-matchmaker
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Traditional Hosting**
+
+```bash
+npm run build
+npm run start
+```
+
+Runs on port 3000 by default. Set `PORT` environment variable to change.
+
+### Environment Variables
+
+- `NODE_ENV`: Set to `production` for builds
+- `PORT`: Default 3000 (for non-Vercel hosting)
+
+## Project Structure
+
+```
+app/
+├── api/recommend/route.ts    # Main recommendation API
+├── page.tsx                  # Home page
+├── layout.tsx                # Root layout
+└── data/cars.json            # Car database
+public/                       # Static assets
+postcss.config.mjs            # PostCSS config
+tailwind.config.ts            # Tailwind CSS config (if using)
+next.config.ts                # Next.js configuration
+```
+
+## License
+
+MIT
