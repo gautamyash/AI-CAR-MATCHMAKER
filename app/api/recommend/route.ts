@@ -27,6 +27,7 @@ type RecommendBody = {
 
 type SearchIntent = {
   budget?: number;
+  budgetType?: "under" | "above";
   type?: CarType;
   wantsMileage: boolean;
   wantsSafety: boolean;
@@ -70,32 +71,61 @@ function getQueryText(body: RecommendBody): string {
   return parts.filter(Boolean).join(" ").toLowerCase();
 }
 
-function parseBudget(query: string): number | undefined {
+function parseBudget(query: string): {
+  amount?: number;
+  type?: "under" | "above";
+} {
   const croreMatch = query.match(/(\d+(?:\.\d+)?)\s*(cr|crore|crores)/);
-  if (croreMatch) {
-    return Number(croreMatch[1]) * 10000000;
-  }
-
   const lakhMatch = query.match(/(\d+(?:\.\d+)?)\s*(lakh|lakhs|lac|lacs|l)/);
-  if (lakhMatch) {
-    return Number(lakhMatch[1]) * 100000;
+
+  let baseAmount: number | undefined;
+  if (croreMatch) {
+    baseAmount = Number(croreMatch[1]) * 10000000;
+  } else if (lakhMatch) {
+    baseAmount = Number(lakhMatch[1]) * 100000;
   }
 
-  const budgetMatch = query.match(
-    /(?:under|below|less than|budget|around|upto|up to)\s*(?:rs\.?|inr|₹)?\s*([\d,]+)/,
+  // Check for explicit budget direction
+  const aboveMatch = query.match(
+    /(?:above|more than|at least|minimum|starts from|from)\s*(?:rs\.?|inr|₹)?\s*([\d,]+)/,
+  );
+  const belowMatch = query.match(
+    /(?:under|below|less than|budget|around|upto|up to|max|maximum)\s*(?:rs\.?|inr|₹)?\s*([\d,]+)/,
   );
 
-  if (!budgetMatch) {
-    return undefined;
+  const aboveAmount = aboveMatch
+    ? Number(aboveMatch[1].replaceAll(",", ""))
+    : undefined;
+  const belowAmount = belowMatch
+    ? Number(belowMatch[1].replaceAll(",", ""))
+    : undefined;
+
+  // Prioritize explicit "above" or "below", fall back to inferred from crore/lakh
+  if (
+    aboveAmount !== undefined &&
+    !Number.isNaN(aboveAmount) &&
+    aboveAmount > 0
+  ) {
+    return {
+      amount: aboveAmount <= 200 ? aboveAmount * 100000 : aboveAmount,
+      type: "above",
+    };
+  }
+  if (
+    belowAmount !== undefined &&
+    !Number.isNaN(belowAmount) &&
+    belowAmount > 0
+  ) {
+    return {
+      amount: belowAmount <= 200 ? belowAmount * 100000 : belowAmount,
+      type: "under",
+    };
+  }
+  if (baseAmount) {
+    return { amount: baseAmount, type: "under" };
   }
 
-  const amount = Number(budgetMatch[1].replaceAll(",", ""));
-
-  if (Number.isNaN(amount)) {
-    return undefined;
-  }
-
-  return amount <= 200 ? amount * 100000 : amount;
+  return {};
 }
 
 function parseIntent(query: string): SearchIntent {
@@ -116,11 +146,17 @@ function parseIntent(query: string): SearchIntent {
     { text: "city", value: "city" },
   ]);
 
-  const familyMatch = query.match(/(\d+)\s*(people|person|members|seater)/);
+  // Enhanced family size detection
+  const familyMatch = query.match(
+    /(\d+)\s*(people|person|members|seater|member|adult|persons)/,
+  );
   const familySize = familyMatch ? Number(familyMatch[1]) : undefined;
 
+  const budgetParsed = parseBudget(query);
+
   return {
-    budget: parseBudget(query),
+    budget: budgetParsed.amount,
+    budgetType: budgetParsed.type,
     type: type as CarType | undefined,
     wantsMileage:
       query.includes("mileage") ||
@@ -143,13 +179,30 @@ function parseIntent(query: string): SearchIntent {
 }
 
 function filterCars(car: Car, intent: SearchIntent): boolean {
-  if (intent.budget && car.price > intent.budget) return false;
+  // Budget filtering with support for both under and above
+  if (intent.budget) {
+    if (intent.budgetType === "above" && car.price < intent.budget)
+      return false;
+    if (intent.budgetType === "under" && car.price > intent.budget)
+      return false;
+    if (!intent.budgetType && car.price > intent.budget) return false;
+  }
+
+  // Avoid conflicting car type and fuel type combinations
   if (intent.type && car.type !== intent.type) return false;
   if (intent.wantsEV && car.fuelType !== "EV") return false;
   if (intent.transmission && car.transmission !== intent.transmission)
     return false;
+
+  // Use case filtering
   if (intent.useCase === "city" && !car.cityUse) return false;
   if (intent.useCase === "highway" && !car.highwayUse) return false;
+
+  // Family size sanity check - avoid obviously wrong matches
+  if (intent.familySize) {
+    if (intent.familySize <= 4 && car.seatingCapacity >= 7) return false;
+    if (intent.familySize > 4 && car.seatingCapacity <= 5) return false;
+  }
 
   return true;
 }
@@ -191,10 +244,17 @@ function calculateFamilyScore(
 function scoreCar(car: Car, intent: SearchIntent): number {
   let score = 0;
 
-  // Budget scoring
+  // Budget scoring with bidirectional support
   if (intent.budget) {
-    const budgetLeft = intent.budget - car.price;
-    score += Math.max(0, 30 - (budgetLeft / intent.budget) * 20);
+    if (intent.budgetType === "above") {
+      // Higher price is better for "above" budget queries
+      const priceAbove = car.price - intent.budget;
+      score += Math.max(0, Math.min(30, (priceAbove / intent.budget) * 30));
+    } else {
+      // Under/max budget: penalize if over budget, reward staying under
+      const budgetLeft = intent.budget - car.price;
+      score += Math.max(0, 30 - (budgetLeft / intent.budget) * 20);
+    }
   }
 
   // Type, EV, and transmission matching
@@ -222,7 +282,7 @@ function scoreCar(car: Car, intent: SearchIntent): number {
     score += Math.min(car.bootSpace / 40, 15);
   }
 
-  return score;
+  return Number(score.toFixed(1));
 }
 
 function getRecommendationReason(car: Car, intent: SearchIntent): string {
